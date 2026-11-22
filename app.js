@@ -795,13 +795,7 @@ if (qrPlaceholder) {
     networkSelect.disabled = true;
   }
 
-  if (byId("depositNetworkWarning")) {
-    byId("depositNetworkWarning").textContent =
-      "Confirm the exact network for this QR code and address before any transfer.";
-  }
-
-  updateDepositDetails();
-}
+  
 
 function updateDepositDetails() {
 const addressElement = byId("selectedDepositAddress");

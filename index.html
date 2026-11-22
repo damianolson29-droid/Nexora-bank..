@@ -606,7 +606,8 @@
       </section>
 
 
-      <!-- WITHDRAW PAGE -->
+     
+<!-- WITHDRAW PAGE -->
 <section id="withdrawPage" class="page hidden">
 
   <section class="panel form-panel">
@@ -673,31 +674,49 @@
           <option>First Citizens Bank</option>
         </select>
 
-       <label for="liveAccountNumber">
-  Live bank account reference
-</label>
+        <label for="liveAccountNumber">
+          Live bank account reference
+        </label>
 
-<input
-  type="text"
-  id="liveAccountNumber"
-  placeholder="e.g. Live-ACCOUNT-1234"
-  pattern="Live-[A-Za-z0-9-]+"
-  
->
+        <input
+          type="text"
+          id="liveAccountNumber"
+          placeholder="e.g. LIVE-ACCOUNT-1234"
+          pattern="LIVE-[A-Za-z0-9-]+"
+        >
 
-<label for="liveRoutingNumber">
-  routing reference
-</label>
+        <label for="liveRoutingNumber">
+          routing reference
+        </label>
 
-<input
-  type="text"
-  id="liveRoutingNumber"
-  placeholder="e.g. Live-ROUTING-5678"
-  pattern="LIVE-[A-Za-z0-9-]+"
-  
->
+        <input
+          type="text"
+          id="liveRoutingNumber"
+          placeholder="e.g. LIVE-ROUTING-5678"
+          pattern="LIVE-[A-Za-z0-9-]+"
+        >
 
+        <p class="bank-LIVE-note">
+          Demo banking references only. No real bank transfers are supported.
+        </p>
 
+      </div>
+
+      <!-- CRYPTO ADDRESS FIELD -->
+      <div id="cryptoDestinationField">
+
+        <label for="destination">
+          Crypto withdrawal address
+        </label>
+
+        <input
+          id="destination"
+          type="text"
+          placeholder="Enter address"
+          minlength="6"
+        >
+
+      </div>
 
       <div class="withdraw-summary">
         <span>Estimated value</span>
@@ -705,7 +724,7 @@
       </div>
 
       <button type="submit" class="submit-button">
-        Submit live withdrawal →
+        Submit withdrawal →
       </button>
 
     </form>
@@ -713,6 +732,7 @@
   </section>
 
 </section>
+
 
 
       <!-- EXCHANGE PAGE -->

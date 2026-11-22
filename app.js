@@ -566,11 +566,7 @@ document.addEventListener("DOMContentLoaded", () => {
     container.innerHTML = list.map(item => {
       const isFunding = item.type === "account_funded";
 
-      const title = isFunding
-  ? (
-      item.funding_method === "bank_deposit_demo"
-        ? "Direct Bank Deposit"
-        : "Account Funded"
+      
 
       const sign = isFunding ? "+" : "−";
       const amountClass = isFunding ? "positive" : "negative";

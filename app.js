@@ -2,722 +2,844 @@
 "use strict";
 
 document.addEventListener("DOMContentLoaded", () => {
-// ========================================
-// NEXORA — AUTHENTICATION + DASHBOARD
-// LIVE dashboard interface.
-// No real cryptocurrency is sent.
-// ========================================
 
-const byId = id => document.getElementById(id);
-const api = window.Nexora;
+  // ========================================
+  // NEXORA — DEMO AUTHENTICATION + DASHBOARD
+  // ========================================
 
-const authScreen = byId("authScreen");
-const appShell = byId("appShell");
-const mobileNav = document.querySelector(".mobile-nav");
-const signupPanel = byId("signupPanel");
-const loginPanel = byId("loginPanel");
-const signupForm = byId("signupForm");
-const loginForm = byId("loginForm");
-const signupMessage = byId("signupMessage");
-const loginMessage = byId("loginMessage");
+  const byId = id => document.getElementById(id);
+  const api = window.Nexora;
 
-const PRICES = { BTC: 68000, ETH: 3200, USDT: 1, USD: 1 };
+  const authScreen = byId("authScreen");
+  const appShell = byId("appShell");
+  const mobileNav = document.querySelector(".mobile-nav");
 
-const DEFAULT_ASSETS = [
-{ symbol: "BTC", name: "Bitcoin", icon: " ", className: "btc" },
-{ symbol: "ETH", name: "Ethereum", icon: "◆", className: "eth" },
-{ symbol: "USDT", name: "Tether", icon: "₮", className: "usdt" },
-{ symbol: "USD", name: "US Dollar", icon: "$", className: "usd" }
-];
+  const signupPanel = byId("signupPanel");
+  const loginPanel = byId("loginPanel");
 
-// QR image paths. These files should be beside index.html.
-const DEPOSIT_ASSETS = {
-  BTC: {
-    name: "Bitcoin",
-    symbol: "BTC",
-    icon: "₿",
-    className: "btc",
-    image: "./BTC.JPG",
-    network: "Bitcoin network"
-  },
+  const signupForm = byId("signupForm");
+  const loginForm = byId("loginForm");
 
-  ETH: {
-    name: "Ethereum",
-    symbol: "ETH",
-    icon: "◆",
-    className: "eth",
-    image: "./ETH.JPG",
-    network: "Network not verified"
-  },
+  const signupMessage = byId("signupMessage");
+  const loginMessage = byId("loginMessage");
 
-  USDT: {
-    name: "Tether",
-    symbol: "USDT",
-    icon: "₮",
-    className: "usdt",
-    image: "./USDT.JPG",
-    network: "Network not verified"
-  }
-};
-
-let assets = DEFAULT_ASSETS.map(a => ({ ...a, balance: 0 }));
-let transactions = [];
-let selectedAsset = "BTC";
-let selectedDepositAsset = null;
-let depositAddresses = new Map();
-let busy = false;
-let accountReady = false;
-
-if (!api?.client) {
-console.error("NEXORA Supabase client is unavailable.");
-return;
-}
-
-// ========================================
-// DISPLAY HELPERS
-// ========================================
-
-function formatMoney(value) {
-const n = Number(value);
-return new Intl.NumberFormat("en-US", {
-style: "currency",
-currency: "USD",
-minimumFractionDigits: 2,
-maximumFractionDigits: 2
-}).format(Number.isFinite(n) ? n : 0);
-}
-
-function formatQuantity(value, symbol) {
-const n = Number(value);
-const decimals = ["USD", "USDT"].includes(symbol) ? 2 : 8;
-return `${new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: decimals
-}).format(Number.isFinite(n) ? n : 0)} ${symbol}`;
-}
-
-function escapeHTML(value) {
-return String(value).replace(/[&<>"']/g, c => ({
-"&": "&amp;",
-"<": "&lt;",
-">": "&gt;",
-'"': "&quot;",
-"'": "&#39;"
-})[c]);
-}
-
-function showNotice(message, type = "info") {
-const notice = byId("notice");
-const noticeText = byId("noticeText");
-
-if (!notice || !noticeText) {
-  console.log(message);
-  return;
-}
-
-noticeText.textContent = message;
-notice.classList.remove("hidden", "success", "error");
-
-if (type === "success") notice.classList.add("success");
-if (type === "error") notice.classList.add("error");
-}
-
-function hideNotice() {
-byId("notice")?.classList.add("hidden");
-}
-
-byId("closeNotice")?.addEventListener("click", hideNotice);
-
-function getAsset(symbol) {
-return assets.find(a => a.symbol === symbol);
-}
-
-function portfolioValue() {
-return assets.reduce(
-(sum, a) => sum + a.balance * PRICES[a.symbol],
-0
-);
-}
-
-// ========================================
-// LOGIN / SIGNUP
-// ========================================
-
-function showSignup() {
-signupPanel?.classList.remove("hidden");
-loginPanel?.classList.add("hidden");
-
-if (signupMessage) signupMessage.textContent = "";
-if (loginMessage) loginMessage.textContent = "";
-}
-
-function showLogin() {
-loginPanel?.classList.remove("hidden");
-signupPanel?.classList.add("hidden");
-
-if (signupMessage) signupMessage.textContent = "";
-if (loginMessage) loginMessage.textContent = "";
-}
-
-function showDashboard(user) {
-authScreen?.classList.add("hidden");
-appShell?.classList.remove("hidden");
-mobileNav?.classList.remove("hidden");
-
-const name =
-  user.user_metadata?.full_name ||
-  user.email?.split("@")[0] ||
-  "User";
-
-const profileName = document.querySelector(".profile-name");
-const welcomeTitle = byId("welcomeTitle");
-const avatar = document.querySelector(".avatar");
-
-if (profileName) profileName.textContent = name;
-if (welcomeTitle) welcomeTitle.textContent = `Welcome, ${name}`;
-if (avatar) avatar.textContent = name.charAt(0).toUpperCase();
-}
-
-byId("showLogin")?.addEventListener("click", showLogin);
-byId("showSignup")?.addEventListener("click", showSignup);
-
-signupForm?.addEventListener("submit", async event => {
-event.preventDefault();
-if (signupMessage) signupMessage.textContent = "";
-const name = byId("signupName")?.value.trim();
-const email = byId("signupEmail")?.value.trim();
-const password = byId("signupPassword")?.value;
-const confirmPassword = byId("confirmPassword")?.value;
-
-if (!name || !email || !password) {
-  if (signupMessage) {
-    signupMessage.textContent = "Complete all required fields.";
-  }
-  return;
-}
-
-if (password !== confirmPassword) {
-  if (signupMessage) {
-    signupMessage.textContent = "Passwords do not match.";
-  }
-  return;
-}
-
-const button = signupForm.querySelector('[type="submit"]');
-if (button) button.disabled = true;
-
-try {
-  const { data, error } = await api.client.auth.signUp({
-    email,
-    password,
-    options: { data: { full_name: name } }
-  });
-
-  if (error) throw error;
-
-  if (data.session && data.user) {
-    showDashboard(data.user);
-    await refreshAccount();
-  } else {
-    showLogin();
-
-    if (loginMessage) {
-      loginMessage.textContent =
-        "Account created. Log in with your email and password.";
-    }
-  }
-} catch (error) {
-  if (signupMessage) signupMessage.textContent = error.message;
-} finally {
-  if (button) button.disabled = false;
-}
-});
-
-loginForm?.addEventListener("submit", async event => {
-event.preventDefault();
-
-if (loginMessage) loginMessage.textContent = "";
-
-const email = byId("loginEmail")?.value.trim();
-const password = byId("loginPassword")?.value;
-const button = loginForm.querySelector('[type="submit"]');
-
-if (button) button.disabled = true;
-
-try {
-  const { data, error } =
-    await api.client.auth.signInWithPassword({ email, password });
-
-  if (error) throw error;
-  if (!data.user) throw new Error("Login returned no user.");
-
-  showDashboard(data.user);
-  await refreshAccount();
-} catch (error) {
-  if (loginMessage) loginMessage.textContent = error.message;
-} finally {
-  if (button) button.disabled = false;
-}
-});
-
-document.addEventListener("click", async event => {
-if (!event.target.closest("#logoutButton")) return;
-
-const { error } = await api.client.auth.signOut();
-
-if (error) {
-  alert("Could not log out: " + error.message);
-  return;
-}
-
-accountReady = false;
-assets = DEFAULT_ASSETS.map(a => ({ ...a, balance: 0 }));
-transactions = [];
-depositAddresses.clear();
-selectedDepositAsset = null;
-
-renderAll();
-appShell?.classList.add("hidden");
-mobileNav?.classList.add("hidden");
-authScreen?.classList.remove("hidden");
-
-showLogin();
-});
-
-// ========================================
-// LOAD BALANCES FROM SUPABASE
-// ========================================
-
-async function refreshAccount() {
-if (busy) return false;
-
-busy = true;
-accountReady = false;
-
-try {
-  const { data, error } = await api.client.auth.getSession();
-  if (error) throw error;
-
-  const user = data.session?.user;
-
-  if (!user || user.is_anonymous) {
-    throw new Error("Please log in to your NEXORA account.");
-  }
-
-  const [balanceResult, transactionResult] = await Promise.all([
-    api.getBalances(),
-    api.getTransactions()
-  ]);
-
-  const balanceRows = Array.isArray(balanceResult)
-    ? balanceResult
-    : balanceResult?.data || [];
-
-  const transactionRows = Array.isArray(transactionResult)
-    ? transactionResult
-    : transactionResult?.data || [];
-
-  console.log("NEXORA logged-in UID:", user.id);
-  console.log("NEXORA balance rows:", balanceRows.length);
-
-  const mapped = DEFAULT_ASSETS.map(defaultAsset => {
-    const row = balanceRows.find(
-       r => r.asset === defaultAsset.symbol
-    );
-
-    if (!row) {
-      throw new Error(
-         `Supabase has no ${defaultAsset.symbol} balance row for this user.`
-      );
-    }
-
-    const balance = Number(row.balance);
-
-    if (!Number.isFinite(balance) || balance < 0) {
-      throw new Error(
-         `Invalid ${defaultAsset.symbol} balance in Supabase.`
-      );
-    }
-
-    return { ...defaultAsset, balance };
-  });
-
-  assets = mapped;
-
-  
-transactions = transactionRows.map(row => {
-
-  const isFunding =
-    row.type === "account_funded" ||
-    row.type === "Account Funded";
-
-  return {
-    type: isFunding
-      ? "account_funded"
-      : "simulated withdrawal",
-
-    funding_method: String(row.funding_method || ""),
-
-    asset: String(row.asset || "Unknown"),
-
-    amount: isFunding
-      ? Math.abs(Number(row.amount) || 0)
-      : -Math.abs(Number(row.amount) || 0),
-
-    status: String(row.status || "Pending"),
-
-    date: row.created_at
-      ? new Date(row.created_at).toLocaleString()
-      : "Date unavailable"
+  const PRICES = {
+    BTC: 68000,
+    ETH: 3200,
+    USDT: 1,
+    USD: 1
   };
-});
 
-accountReady = true;
-  renderAll();
-  hideNotice();
-
-  return true;
-} catch (error) {
-  console.error("NEXORA account load error:", error);
-
-  assets = DEFAULT_ASSETS.map(a => ({ ...a, balance: 0 }));
-transactions = [];
-
-  renderAll();
-
-  showNotice(
-     `${error.message} Displayed balances are zero until Supabase is verified.`,
-     "error"
-  );
-
-  return false;
-} finally {
-  busy = false;
-}
-}
-
-// ========================================
-// DASHBOARD RENDERING
-// ========================================
-
-function renderAll() {
-if (byId("totalBalance")) {
-byId("totalBalance").textContent =
-formatMoney(portfolioValue());
-}
-
-if (byId("assetCount")) {
-  byId("assetCount").textContent =
-    String(assets.filter(a => a.balance > 0).length);
-}
-
-if (byId("transactionCount")) {
-  byId("transactionCount").textContent =
-    String(transactions.length);
-}
-
-renderAssets(byId("assetSearch")?.value || "");
-renderTransactions("recentTransactions", transactions.slice(0, 5));
-renderTransactions("allTransactions", transactions);
-updateWithdrawAsset();
-}
-
-function renderAssets(searchTerm = "") {
-const container = byId("assetList");
-if (!container) return;
-
-const term = searchTerm.trim().toLowerCase();
-
-const filtered = assets.filter(a =>
-   a.symbol.toLowerCase().includes(term) ||
-   a.name.toLowerCase().includes(term)
-);
-
-if (!filtered.length) {
-  container.innerHTML =
-    '<p class="empty-state">No matching assets.</p>';
-  return;
-}
-
-container.innerHTML = filtered.map(a => `
-  <button type="button"
-    class="asset-row ${selectedAsset === a.symbol ? "selected" : ""}"
-    data-asset="${a.symbol}">
-    <span class="asset-name">
-      <span class="coin-icon ${a.className}">${a.icon}</span>
-      <span>
-        <strong>${a.symbol}</strong>
-        <small>${a.name}</small>
-      </span>
-    </span>
-    <span class="asset-balance">
-      ${formatQuantity(a.balance, a.symbol)}
-    </span>
-    <span class="asset-price">
-      ${formatMoney(PRICES[a.symbol])}
-    </span>
-    <span class="asset-value">
-      ${formatMoney(a.balance * PRICES[a.symbol])}
-    </span>
-  </button>
-`).join("");
-
-container.querySelectorAll("[data-asset]").forEach(button => {
-  button.addEventListener("click", () => {
-    selectedAsset = button.dataset.asset;
-    renderAll();
-  });
-});
-}
-
-byId("assetSearch")?.addEventListener("input", event => {
-renderAssets(event.target.value);
-});
-
-function renderTransactions(containerId, list) {
-const container = byId(containerId);
-if (!container) return;
-
-if (!list.length) {
-container.innerHTML =
-'<p class="empty-state">No transactions recorded.</p>';
-return;
-}
-
-container.innerHTML = list.map(item => {
-const isFunding = item.type === "account_funded";
-const title = isFunding ? "Account Funded" : "Withdrawal";
-const sign = isFunding ? "+" : "−";
-const amountClass = isFunding ? "positive" : "negative";
-const icon = isFunding ? "↓" : "↑";
-const date = item.date || (
-item.created_at
-? new Date(item.created_at).toLocaleString()
-: "Date unavailable"
-);
-
-return `
-   <article class="transaction-row">
-     <span class="transaction-icon ${isFunding ? "fund" : "withdraw"}">
-       ${icon}
-     </span>
-     <div class="transaction-description">
-       <strong>${title}</strong>
-       <small>${escapeHTML(date)}</small>
-       <small>${escapeHTML(item.asset)}</small>
-     </div>
-     <div class="transaction-amount">
-       <strong class="${amountClass}">
-         ${sign}${formatQuantity(item.amount, item.asset)}
-       </strong>
-       <small class="transaction-status">
-         ${escapeHTML(item.status)}
-       </small>
-     </div>
-   </article>
-`;
-}).join("");
-}
-
-// ========================================
-// CHART
-// ========================================
-
-let portfolioChartTimer = null;
-
-function drawPortfolioChart() {
-  const line = byId("chartLine");
-  const area = byId("chartArea");
-  const grid = byId("chartGrid");
-  if (!line || !area || !grid) return;
-
-  // Illustrative animation only. It is not connected to a market-price feed.
-  const values = [
-    82, 79, 81, 76, 78, 70, 73, 65, 58, 51,
-    48, 50, 46, 49, 47, 48, 45, 43, 47, 45,
-    49, 51, 50, 53, 55, 52, 56, 54, 59, 57,
-    62, 58, 64, 60, 67, 63, 69, 65, 71, 66,
-    61, 64, 59, 62, 57, 60, 55, 58, 53, 57,
-    51, 56, 61, 58, 66, 63, 72, 68, 80, 74,
-    87, 83, 94, 98
+  const DEFAULT_ASSETS = [
+    { symbol: "BTC", name: "Bitcoin", icon: "₿", className: "btc" },
+    { symbol: "ETH", name: "Ethereum", icon: "◆", className: "eth" },
+    { symbol: "USDT", name: "Tether", icon: "₮", className: "usdt" },
+    { symbol: "USD", name: "US Dollar", icon: "$", className: "usd" }
   ];
 
-  const width = 700;
-  const height = 180;
-  const paddingTop = 12;
-  const paddingBottom = 15;
+  const DEPOSIT_ASSETS = {
+    BTC: {
+      name: "Bitcoin",
+      symbol: "BTC",
+      icon: "₿",
+      className: "btc",
+      image: "./BTC.JPG",
+      network: "Bitcoin network"
+    },
 
-  function renderChart() {
-    const min = Math.min(...values) - 5;
-    const max = Math.max(...values) + 5;
-    const range = max - min || 1;
-    const points = values.map((value, index) => ({
-      x: (index / (values.length - 1)) * width,
-      y: height - paddingBottom -
-        ((value - min) / range) * (height - paddingTop - paddingBottom)
-    }));
+    ETH: {
+      name: "Ethereum",
+      symbol: "ETH",
+      icon: "◆",
+      className: "eth",
+      image: "./ETH.JPG",
+      network: "Network not verified"
+    },
 
-    let linePath = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[Math.max(0, i - 1)];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[Math.min(points.length - 1, i + 2)];
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-      linePath += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+    USDT: {
+      name: "Tether",
+      symbol: "USDT",
+      icon: "₮",
+      className: "usdt",
+      image: "./USDT.JPG",
+      network: "Network not verified"
+    }
+  };
+
+  let assets = DEFAULT_ASSETS.map(a => ({
+    ...a,
+    balance: 0
+  }));
+
+  let transactions = [];
+  let selectedAsset = "BTC";
+  let selectedDepositAsset = null;
+  let depositAddresses = new Map();
+
+  let busy = false;
+  let portfolioChartTimer = null;
+
+  if (!api?.client) {
+    console.error("NEXORA Supabase client is unavailable.");
+    showInitialError();
+    return;
+  }
+
+  function showInitialError() {
+    if (authScreen) authScreen.classList.remove("hidden");
+
+    const message = byId("loginMessage");
+
+    if (message) {
+      message.textContent =
+        "Application connection unavailable. Please check Supabase configuration.";
+    }
+  }
+
+  // ========================================
+  // DISPLAY HELPERS
+  // ========================================
+
+  function formatMoney(value) {
+    const n = Number(value);
+
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(Number.isFinite(n) ? n : 0);
+  }
+
+  function formatQuantity(value, symbol) {
+    const n = Number(value);
+    const decimals = ["USD", "USDT"].includes(symbol) ? 2 : 8;
+
+    return `${new Intl.NumberFormat("en-US", {
+      maximumFractionDigits: decimals
+    }).format(Number.isFinite(n) ? n : 0)} ${symbol}`;
+  }
+
+  function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, c => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[c]);
+  }
+
+  function showNotice(message, type = "info") {
+    const notice = byId("notice");
+    const noticeText = byId("noticeText");
+
+    if (!notice || !noticeText) {
+      console.log(message);
+      return;
     }
 
-    line.setAttribute("d", linePath);
-    line.setAttribute("fill", "none");
-    line.setAttribute("stroke", "#20d99a");
-    line.setAttribute("stroke-width", "2.5");
-    line.setAttribute("stroke-linecap", "round");
-    line.setAttribute("stroke-linejoin", "round");
-    area.setAttribute("d", `${linePath} L ${width} ${height} L 0 ${height} Z`);
-    area.setAttribute("fill", "url(#chartGradient)");
+    noticeText.textContent = message;
+
+    notice.classList.remove("hidden", "success", "error");
+
+    if (type === "success") {
+      notice.classList.add("success");
+    }
+
+    if (type === "error") {
+      notice.classList.add("error");
+    }
   }
 
-  grid.innerHTML = [20, 65, 110, 155].map(y => `
-    <line x1="0" y1="${y}" x2="${width}" y2="${y}"
-      stroke="rgba(255,255,255,0.09)" stroke-dasharray="3 6"></line>
-  `).join("");
+  function hideNotice() {
+    byId("notice")?.classList.add("hidden");
+  }
 
-  if (portfolioChartTimer) clearInterval(portfolioChartTimer);
-  renderChart();
+  byId("closeNotice")?.addEventListener("click", hideNotice);
 
-  // Add a small, smooth-looking random walk every 2.4 seconds.
-  // These are illustrative values, not live market prices.
-  portfolioChartTimer = setInterval(() => {
-    const previous = values[values.length - 1];
-    const movement = (Math.random() - 0.5) * 9;
-    const next = Math.max(18, Math.min(98, previous + movement));
-    values.push(next);
-    values.shift();
+  function getAsset(symbol) {
+    return assets.find(a => a.symbol === symbol);
+  }
+
+  function portfolioValue() {
+    return assets.reduce(
+      (sum, a) => sum + a.balance * PRICES[a.symbol],
+      0
+    );
+  }
+
+  // ========================================
+  // LOGIN / SIGNUP
+  // ========================================
+
+  function showSignup() {
+    signupPanel?.classList.remove("hidden");
+    loginPanel?.classList.add("hidden");
+
+    if (signupMessage) signupMessage.textContent = "";
+    if (loginMessage) loginMessage.textContent = "";
+  }
+
+  function showLogin() {
+    loginPanel?.classList.remove("hidden");
+    signupPanel?.classList.add("hidden");
+
+    if (signupMessage) signupMessage.textContent = "";
+    if (loginMessage) loginMessage.textContent = "";
+  }
+
+  function showDashboard(user) {
+    authScreen?.classList.add("hidden");
+    appShell?.classList.remove("hidden");
+    mobileNav?.classList.remove("hidden");
+
+    const name =
+      user.user_metadata?.full_name ||
+      user.email?.split("@")[0] ||
+      "User";
+
+    const profileName = document.querySelector(".profile-name");
+    const welcomeTitle = byId("welcomeTitle");
+    const avatar = document.querySelector(".avatar");
+
+    if (profileName) profileName.textContent = name;
+    if (welcomeTitle) welcomeTitle.textContent = `Welcome, ${name}`;
+    if (avatar) avatar.textContent = name.charAt(0).toUpperCase();
+  }
+
+  byId("showLogin")?.addEventListener("click", showLogin);
+  byId("showSignup")?.addEventListener("click", showSignup);
+
+  signupForm?.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    if (signupMessage) signupMessage.textContent = "";
+
+    const name = byId("signupName")?.value.trim();
+    const email = byId("signupEmail")?.value.trim();
+    const password = byId("signupPassword")?.value;
+    const confirmPassword = byId("confirmPassword")?.value;
+
+    if (!name || !email || !password) {
+      if (signupMessage) {
+        signupMessage.textContent = "Complete all required fields.";
+      }
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      if (signupMessage) {
+        signupMessage.textContent = "Passwords do not match.";
+      }
+      return;
+    }
+
+    const button = signupForm.querySelector('[type="submit"]');
+
+    if (button) button.disabled = true;
+
+    try {
+      const { data, error } = await api.client.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { full_name: name }
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.session && data.user) {
+        showDashboard(data.user);
+        await refreshAccount();
+      } else {
+        showLogin();
+
+        if (loginMessage) {
+          loginMessage.textContent =
+            "Account created. Log in with your email and password.";
+        }
+      }
+
+    } catch (error) {
+      if (signupMessage) {
+        signupMessage.textContent = error.message;
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
+  loginForm?.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    if (loginMessage) loginMessage.textContent = "";
+
+    const email = byId("loginEmail")?.value.trim();
+    const password = byId("loginPassword")?.value;
+
+    const button = loginForm.querySelector('[type="submit"]');
+
+    if (button) button.disabled = true;
+
+    try {
+      const { data, error } =
+        await api.client.auth.signInWithPassword({
+          email,
+          password
+        });
+
+      if (error) throw error;
+
+      if (!data.user) {
+        throw new Error("Login returned no user.");
+      }
+
+      showDashboard(data.user);
+      await refreshAccount();
+
+    } catch (error) {
+      if (loginMessage) {
+        loginMessage.textContent = error.message;
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
+  document.addEventListener("click", async event => {
+    if (!event.target.closest("#logoutButton")) return;
+
+    const { error } = await api.client.auth.signOut();
+
+    if (error) {
+      alert("Could not log out: " + error.message);
+      return;
+    }
+
+    assets = DEFAULT_ASSETS.map(a => ({
+      ...a,
+      balance: 0
+    }));
+
+    transactions = [];
+    depositAddresses.clear();
+    selectedDepositAsset = null;
+
+    renderAll();
+
+    appShell?.classList.add("hidden");
+    mobileNav?.classList.add("hidden");
+    authScreen?.classList.remove("hidden");
+
+    showLogin();
+  });
+
+  // ========================================
+  // LOAD ACCOUNT DATA
+  // ========================================
+
+  async function refreshAccount() {
+    if (busy) return false;
+
+    busy = true;
+
+    try {
+      const { data, error } =
+        await api.client.auth.getSession();
+
+      if (error) throw error;
+
+      const user = data.session?.user;
+
+      if (!user || user.is_anonymous) {
+        throw new Error("Please log in to your NEXORA account.");
+      }
+
+      const [balanceResult, transactionResult] =
+        await Promise.all([
+          api.getBalances(),
+          api.getTransactions()
+        ]);
+
+      const balanceRows = Array.isArray(balanceResult)
+        ? balanceResult
+        : balanceResult?.data || [];
+
+      const transactionRows = Array.isArray(transactionResult)
+        ? transactionResult
+        : transactionResult?.data || [];
+
+      console.log("NEXORA logged-in UID:", user.id);
+      console.log("NEXORA balance rows:", balanceRows.length);
+
+      const mapped = DEFAULT_ASSETS.map(defaultAsset => {
+        const row = balanceRows.find(
+          r =>
+            String(r.asset || "").trim().toUpperCase() ===
+            defaultAsset.symbol
+        );
+
+        if (!row) {
+          throw new Error(
+            `Supabase has no ${defaultAsset.symbol} balance row for this user.`
+          );
+        }
+
+        const balance = Number(row.balance);
+
+        if (!Number.isFinite(balance) || balance < 0) {
+          throw new Error(
+            `Invalid ${defaultAsset.symbol} balance in Supabase.`
+          );
+        }
+
+        return {
+          ...defaultAsset,
+          balance
+        };
+      });
+
+      assets = mapped;
+
+      transactions = transactionRows.map(row => {
+        const isFunding =
+          row.type === "account_funded" ||
+          row.type === "Account Funded";
+
+        return {
+          type: isFunding
+            ? "account_funded"
+            : "simulated withdrawal",
+
+          funding_method: String(row.funding_method || ""),
+
+          asset: String(row.asset || "Unknown"),
+
+          amount: isFunding
+            ? Math.abs(Number(row.amount) || 0)
+            : -Math.abs(Number(row.amount) || 0),
+
+          status: String(row.status || "Pending"),
+
+          date: row.created_at
+            ? new Date(row.created_at).toLocaleString()
+            : "Date unavailable"
+        };
+      });
+
+      renderAll();
+      hideNotice();
+
+      return true;
+
+    } catch (error) {
+      console.error("NEXORA account load error:", error);
+
+      assets = DEFAULT_ASSETS.map(a => ({
+        ...a,
+        balance: 0
+      }));
+
+      transactions = [];
+
+      renderAll();
+
+      showNotice(
+        `${error.message} Displayed balances are zero until Supabase is verified.`,
+        "error"
+      );
+
+      return false;
+
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ========================================
+  // DASHBOARD RENDERING
+  // ========================================
+
+  function renderAll() {
+    if (byId("totalBalance")) {
+      byId("totalBalance").textContent =
+        formatMoney(portfolioValue());
+    }
+
+    if (byId("assetCount")) {
+      byId("assetCount").textContent =
+        String(assets.filter(a => a.balance > 0).length);
+    }
+
+    if (byId("transactionCount")) {
+      byId("transactionCount").textContent =
+        String(transactions.length);
+    }
+
+    renderAssets(byId("assetSearch")?.value || "");
+
+    renderTransactions(
+      "recentTransactions",
+      transactions.slice(0, 5)
+    );
+
+    renderTransactions(
+      "allTransactions",
+      transactions
+    );
+
+    updateWithdrawAsset();
+  }
+
+  function renderAssets(searchTerm = "") {
+    const container = byId("assetList");
+
+    if (!container) return;
+
+    const term = searchTerm.trim().toLowerCase();
+
+    const filtered = assets.filter(a =>
+      a.symbol.toLowerCase().includes(term) ||
+      a.name.toLowerCase().includes(term)
+    );
+
+    if (!filtered.length) {
+      container.innerHTML =
+        '<p class="empty-state">No matching assets.</p>';
+      return;
+    }
+
+    container.innerHTML = filtered.map(a => `
+      <button type="button"
+        class="asset-row ${selectedAsset === a.symbol ? "selected" : ""}"
+        data-asset="${a.symbol}">
+
+        <span class="asset-name">
+          <span class="coin-icon ${a.className}">${a.icon}</span>
+
+          <span>
+            <strong>${a.symbol}</strong>
+            <small>${a.name}</small>
+          </span>
+        </span>
+
+        <span class="asset-balance">
+          ${formatQuantity(a.balance, a.symbol)}
+        </span>
+
+        <span class="asset-price">
+          ${formatMoney(PRICES[a.symbol])}
+        </span>
+
+        <span class="asset-value">
+          ${formatMoney(a.balance * PRICES[a.symbol])}
+        </span>
+
+      </button>
+    `).join("");
+
+    container.querySelectorAll("[data-asset]").forEach(button => {
+      button.addEventListener("click", () => {
+        selectedAsset = button.dataset.asset;
+        renderAll();
+      });
+    });
+  }
+
+  byId("assetSearch")?.addEventListener("input", event => {
+    renderAssets(event.target.value);
+  });
+
+  function renderTransactions(containerId, list) {
+    const container = byId(containerId);
+
+    if (!container) return;
+
+    if (!list.length) {
+      container.innerHTML =
+        '<p class="empty-state">No transactions recorded.</p>';
+      return;
+    }
+
+    container.innerHTML = list.map(item => {
+      const isFunding = item.type === "account_funded";
+
+      const title = isFunding
+        ? "Demo Account Funding"
+        : "Simulated Withdrawal";
+
+      const sign = isFunding ? "+" : "−";
+      const amountClass = isFunding ? "positive" : "negative";
+      const icon = isFunding ? "↓" : "↑";
+
+      const date = item.date || (
+        item.created_at
+          ? new Date(item.created_at).toLocaleString()
+          : "Date unavailable"
+      );
+
+      return `
+        <article class="transaction-row">
+
+          <span class="transaction-icon ${isFunding ? "fund" : "withdraw"}">
+            ${icon}
+          </span>
+
+          <div class="transaction-description">
+            <strong>${title}</strong>
+            <small>${escapeHTML(date)}</small>
+            <small>${escapeHTML(item.asset)}</small>
+          </div>
+
+          <div class="transaction-amount">
+            <strong class="${amountClass}">
+              ${sign}${formatQuantity(item.amount, item.asset)}
+            </strong>
+
+            <small class="transaction-status">
+              ${escapeHTML(item.status)}
+            </small>
+          </div>
+
+        </article>
+      `;
+    }).join("");
+  }
+
+  // ========================================
+  // ILLUSTRATIVE PORTFOLIO CHART
+  // ========================================
+
+  function drawPortfolioChart() {
+    const line = byId("chartLine");
+    const area = byId("chartArea");
+    const grid = byId("chartGrid");
+
+    if (!line || !area || !grid) return;
+
+    const values = [
+      82, 79, 81, 76, 78, 70, 73, 65, 58, 51,
+      48, 50, 46, 49, 47, 48, 45, 43, 47, 45,
+      49, 51, 50, 53, 55, 52, 56, 54, 59, 57,
+      62, 58, 64, 60, 67, 63, 69, 65, 71, 66,
+      61, 64, 59, 62, 57, 60, 55, 58, 53, 57,
+      51, 56, 61, 58, 66, 63, 72, 68, 80, 74,
+      87, 83, 94, 98
+    ];
+
+    const width = 700;
+    const height = 180;
+    const paddingTop = 12;
+    const paddingBottom = 15;
+
+    function renderChart() {
+      const min = Math.min(...values) - 5;
+      const max = Math.max(...values) + 5;
+      const range = max - min || 1;
+
+      const points = values.map((value, index) => ({
+        x: (index / (values.length - 1)) * width,
+        y: height - paddingBottom -
+          ((value - min) / range) *
+          (height - paddingTop - paddingBottom)
+      }));
+
+      let linePath =
+        `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[Math.max(0, i - 1)];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = points[Math.min(points.length - 1, i + 2)];
+
+        const cp1x = p1.x + (p2.x - p0.x) / 6;
+        const cp1y = p1.y + (p2.y - p0.y) / 6;
+
+        const cp2x = p2.x - (p3.x - p1.x) / 6;
+        const cp2y = p2.y - (p3.y - p1.y) / 6;
+
+        linePath +=
+          ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)},` +
+          ` ${cp2x.toFixed(2)} ${cp2y.toFixed(2)},` +
+          ` ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+      }
+
+      line.setAttribute("d", linePath);
+      line.setAttribute("fill", "none");
+      line.setAttribute("stroke", "#20d99a");
+      line.setAttribute("stroke-width", "2.5");
+      line.setAttribute("stroke-linecap", "round");
+      line.setAttribute("stroke-linejoin", "round");
+
+      area.setAttribute(
+        "d",
+        `${linePath} L ${width} ${height} L 0 ${height} Z`
+      );
+
+      area.setAttribute("fill", "url(#chartGradient)");
+    }
+
+    grid.innerHTML = [20, 65, 110, 155].map(y => `
+      <line
+        x1="0"
+        y1="${y}"
+        x2="${width}"
+        y2="${y}"
+        stroke="rgba(255,255,255,0.09)"
+        stroke-dasharray="3 6">
+      </line>
+    `).join("");
+
+    if (portfolioChartTimer) {
+      clearInterval(portfolioChartTimer);
+    }
+
     renderChart();
-  }, 2400);
-}
 
-// ========================================
-// UPDATE WITHDRAWAL ASSET
-// ========================================
+    portfolioChartTimer = setInterval(() => {
+      const previous = values[values.length - 1];
+      const movement = (Math.random() - 0.5) * 9;
 
-function updateWithdrawAsset() {
-  const select = byId("withdrawAsset");
+      const next = Math.max(
+        18,
+        Math.min(98, previous + movement)
+      );
 
-  if (select) {
-    selectedAsset = select.value;
+      values.push(next);
+      values.shift();
+
+      renderChart();
+    }, 2400);
   }
 
-  const assetCode = selectedAsset;
-  const asset = getAsset(assetCode);
+  // ========================================
+  // WITHDRAWAL ASSET DISPLAY
+  // ========================================
 
-  // Update available balance
-  if (byId("availableBalance")) {
-    byId("availableBalance").textContent = asset
-      ? formatQuantity(asset.balance, asset.symbol)
-      : "Unavailable";
+  function updateWithdrawAsset() {
+    const select = byId("withdrawAsset");
+
+    if (select) {
+      selectedAsset = select.value;
+    }
+
+    const assetCode = selectedAsset;
+    const asset = getAsset(assetCode);
+
+    if (byId("availableBalance")) {
+      byId("availableBalance").textContent = asset
+        ? formatQuantity(asset.balance, asset.symbol)
+        : "Unavailable";
+    }
+
+    const isUSD = assetCode === "USD";
+
+    byId("usdBankFields")?.classList.toggle("hidden", !isUSD);
+
+    byId("cryptoDestinationField")?.classList.toggle(
+      "hidden",
+      isUSD
+    );
+
+    const bankSelect = byId("usdBankSelect");
+    const cryptoAddress = byId("destination");
+
+    if (bankSelect) {
+      bankSelect.required = isUSD;
+    }
+
+    if (cryptoAddress) {
+      cryptoAddress.required = !isUSD;
+    }
+
+    updateEstimatedValue();
   }
 
-  // Identify withdrawal type
-  const isUSD = assetCode === "USD";
+  function updateEstimatedValue() {
+    const amount = Number(byId("withdrawAmount")?.value);
 
-  // Show bank details only for USD
-  const bankFields = byId("usdBankFields");
+    const value =
+      Number.isFinite(amount) && amount > 0
+        ? amount
+        : 0;
 
-  if (bankFields) {
-    bankFields.classList.toggle("hidden", !isUSD);
+    if (byId("estimatedValue")) {
+      byId("estimatedValue").textContent =
+        formatMoney(value * (PRICES[selectedAsset] || 0));
+    }
   }
 
-  // Show crypto address only for crypto
-  const cryptoField = byId("cryptoDestinationField");
+  byId("withdrawAsset")?.addEventListener(
+    "change",
+    updateWithdrawAsset
+  );
 
-  if (cryptoField) {
-    cryptoField.classList.toggle("hidden", isUSD);
-  }
+  byId("withdrawAmount")?.addEventListener(
+    "input",
+    updateEstimatedValue
+  );
 
-  // Update required fields
-  const bankSelect = byId("usdBankSelect");
-  const cryptoAddress = byId("destination");
-
-  if (bankSelect) {
-    bankSelect.required = isUSD;
-  }
-
-  if (cryptoAddress) {
-    cryptoAddress.required = !isUSD;
-  }
-
-  updateEstimatedValue();
-}
-
-// ========================================
-// UPDATE ESTIMATED WITHDRAWAL VALUE
-// ========================================
-
-function updateEstimatedValue() {
-  const amount = Number(byId("withdrawAmount")?.value);
-
-  const value =
-    Number.isFinite(amount) && amount > 0 ? amount : 0;
-
-  if (byId("estimatedValue")) {
-    byId("estimatedValue").textContent =
-      formatMoney(value * PRICES[selectedAsset]);
-  }
-}
-
-// ========================================
+  // ========================================
 // DEPOSIT ADDRESSES — SUPABASE
 // ========================================
 
 async function loadDepositAddresses() {
-const message = byId("depositMessage");
+  const message = byId("depositMessage");
 
-if (message) {
-  message.textContent = "Loading deposit addresses...";
-}
+  if (message) {
+    message.textContent = "Loading deposit addresses...";
+  }
 
-try {
-  const { data, error } = await api.client
-    .from("nexora_deposit_addresses")
-    .select("asset, wallet_address")
-    .in("asset", ["BTC", "ETH", "USDT"]);
+  try {
+    const { data, error } = await api.client
+      .from("nexora_deposit_addresses")
+      .select("asset, wallet_address")
+      .in("asset", ["BTC", "ETH", "USDT"]);
 
-  if (error) throw error;
+    if (error) throw error;
 
-  depositAddresses = new Map(
-     (data || []).map(item => [
+    depositAddresses = new Map(
+      (data || []).map(item => [
         String(item.asset).toUpperCase(),
         String(item.wallet_address || "").trim()
-     ])
-  );
+      ])
+    );
 
-  updateDepositDetails();
+    updateDepositDetails();
 
-  if (message) {
-    message.textContent = selectedDepositAsset
-      ? ""
-      : "Choose a cryptocurrency to view its deposit details.";
-  }
-} catch (error) {
-  console.error("Deposit address loading failed:", error);
-  depositAddresses.clear();
+    if (message && !selectedDepositAsset) {
+      message.textContent =
+        "Choose a cryptocurrency to view its deposit details.";
+    }
 
-  updateDepositDetails();
+  } catch (error) {
+    console.error("Deposit address loading failed:", error);
 
-  if (message) {
-    message.textContent =
-      "Could not load deposit addresses from Supabase.";
+    depositAddresses.clear();
+    updateDepositDetails();
+
+    if (message) {
+      message.textContent =
+        "Could not load deposit addresses from Supabase.";
+    }
   }
 }
-}
 
-  // Listen for withdrawal asset changes
+// ========================================
+// WITHDRAWAL ASSET LISTENER
+// ========================================
+
 byId("withdrawAsset")?.addEventListener("change", () => {
   updateWithdrawAsset();
 });
+
+byId("withdrawAmount")?.addEventListener(
+  "input",
+  updateEstimatedValue
+);
 
 // ========================================
 // DEPOSIT SCREEN CONTROLS
@@ -761,27 +883,27 @@ function showDepositDetails(symbol) {
   }
 
   const qrImage = byId("depositQrImage");
-const qrPlaceholder = byId("depositQrPlaceholder");
+  const qrPlaceholder = byId("depositQrPlaceholder");
 
-if (qrImage) {
-  qrImage.src = config.image;
-  qrImage.alt = `${config.symbol} QR code`;
-  qrImage.hidden = false;
+  if (qrImage) {
+    qrImage.src = config.image;
+    qrImage.alt = `${config.symbol} QR code`;
+    qrImage.hidden = false;
 
-  qrImage.onerror = () => {
-    qrImage.hidden = true;
+    qrImage.onerror = () => {
+      qrImage.hidden = true;
 
-    if (qrPlaceholder) {
-      qrPlaceholder.hidden = false;
-    }
+      if (qrPlaceholder) {
+        qrPlaceholder.hidden = false;
+      }
 
-    console.error("QR image could not load:", config.image);
-  };
-}
+      console.error("QR image could not load:", config.image);
+    };
+  }
 
-if (qrPlaceholder) {
-  qrPlaceholder.hidden = true;
-}
+  if (qrPlaceholder) {
+    qrPlaceholder.hidden = true;
+  }
 
   const networkSelect = byId("depositNetwork");
 
@@ -791,14 +913,25 @@ if (qrPlaceholder) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = config.network;
+
     networkSelect.appendChild(option);
     networkSelect.disabled = true;
   }
 
-  
+  if (byId("depositNetworkWarning")) {
+    byId("depositNetworkWarning").textContent =
+      " ";
+  }
+
+  updateDepositDetails();
+}
+
+// ========================================
+// DISPLAY SELECTED DEPOSIT ADDRESS
+// ========================================
 
 function updateDepositDetails() {
-const addressElement = byId("selectedDepositAddress");
+  const addressElement = byId("selectedDepositAddress");
   const message = byId("depositMessage");
 
   if (!addressElement) return;
@@ -813,7 +946,9 @@ const addressElement = byId("selectedDepositAddress");
   if (address) {
     addressElement.textContent = address;
 
-    if (message) message.textContent = "";
+    if (message) {
+      message.textContent = "";
+    }
   } else {
     addressElement.textContent = "Address not available yet.";
 
@@ -824,16 +959,27 @@ const addressElement = byId("selectedDepositAddress");
   }
 }
 
+// ========================================
+// SELECT DEPOSIT CRYPTOCURRENCY
+// ========================================
+
 document.querySelectorAll("[data-deposit-asset]").forEach(button => {
   button.addEventListener("click", () => {
-    const symbol = button.dataset.depositAsset;
-    showDepositDetails(symbol);
+    showDepositDetails(button.dataset.depositAsset);
   });
 });
+
+// ========================================
+// BACK TO DEPOSIT ASSET LIST
+// ========================================
 
 byId("backToCrypto")?.addEventListener("click", () => {
   showDepositAssetList();
 });
+
+// ========================================
+// COPY DEPOSIT ADDRESS
+// ========================================
 
 byId("copySelectedDepositAddress")?.addEventListener(
   "click",
@@ -858,6 +1004,7 @@ byId("copySelectedDepositAddress")?.addEventListener(
       await navigator.clipboard.writeText(address);
 
       showNotice("Deposit address copied.", "success");
+
     } catch (error) {
       console.error("Copy address failed:", error);
 
@@ -924,7 +1071,8 @@ document.querySelectorAll("[data-page]").forEach(button => {
   button.addEventListener("click", event => {
     event.preventDefault();
 
-  const page = button.dataset.page;
+    const page = button.dataset.page;
+
     navigateTo(page);
 
     if (page === "Exchange") {
@@ -951,6 +1099,7 @@ byId("menuButton")?.addEventListener("click", () => {
 async function startDashboard(user) {
   showDashboard(user);
   drawPortfolioChart();
+
   await navigateTo("Dashboard");
   await refreshAccount();
 }
@@ -966,6 +1115,7 @@ async function restoreSession() {
 
     if (user && !user.is_anonymous) {
       await startDashboard(user);
+
     } else {
       appShell?.classList.add("hidden");
       mobileNav?.classList.add("hidden");
@@ -973,6 +1123,7 @@ async function restoreSession() {
 
       showSignup();
     }
+
   } catch (error) {
     console.error("NEXORA session restore error:", error);
 
@@ -1012,6 +1163,7 @@ function showReceipt({
     new Date(date).toLocaleString();
 
   const statusElement = byId("receiptStatus");
+
   statusElement.textContent = status.toUpperCase();
 
   byId("receiptSection").hidden = false;
@@ -1021,5 +1173,4 @@ byId("closeReceipt")?.addEventListener("click", () => {
   byId("receiptSection").hidden = true;
 });
 
-  });
-
+});

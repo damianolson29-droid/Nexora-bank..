@@ -77,6 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let depositAddresses = new Map();
 
   let busy = false;
+  let withdrawalSubmitting = false;
   let portfolioChartTimer = null;
 
   if (!api?.client) {
@@ -373,6 +374,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       console.log("NEXORA logged-in UID:", user.id);
       console.log("NEXORA balance rows:", balanceRows.length);
+      console.log("NEXORA transaction rows:", transactionRows.length);
 
       const mapped = DEFAULT_ASSETS.map(defaultAsset => {
         const row = balanceRows.find(
@@ -409,6 +411,8 @@ document.addEventListener("DOMContentLoaded", () => {
           row.type === "Account Funded";
 
         return {
+          id: row.id,
+
           type: isFunding
             ? "account_funded"
             : "simulated withdrawal",
@@ -417,15 +421,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
           asset: String(row.asset || "Unknown"),
 
-          amount: isFunding
-            ? Math.abs(Number(row.amount) || 0)
-            : -Math.abs(Number(row.amount) || 0),
+          amount: Math.abs(Number(row.amount) || 0),
 
           status: String(row.status || "Pending"),
 
           date: row.created_at
             ? new Date(row.created_at).toLocaleString()
-            : "Date unavailable"
+            : "Date unavailable",
+
+          created_at: row.created_at
         };
       });
 
@@ -437,17 +441,8 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error("NEXORA account load error:", error);
 
-      assets = DEFAULT_ASSETS.map(a => ({
-        ...a,
-        balance: 0
-      }));
-
-      transactions = [];
-
-      renderAll();
-
       showNotice(
-        `${error.message} Displayed balances are zero until Supabase is verified.`,
+        `${error.message} Account data could not be refreshed.`,
         "error"
       );
 
@@ -567,12 +562,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const isFunding = item.type === "account_funded";
 
       const title = isFunding
-  ? (
-      item.funding_method === "bank_deposit_demo"
-        ? "Direct Bank Deposit"
-        : "Account Funded"
-    )
-  : " Withdrawal Request";
+        ? (
+            item.funding_method === "bank_deposit_demo"
+              ? "Direct Bank Deposit"
+              : "Account Funded"
+          )
+        : "Withdrawal Request";
 
       const sign = isFunding ? "+" : "−";
       const amountClass = isFunding ? "positive" : "negative";
@@ -751,13 +746,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const bankSelect = byId("usdBankSelect");
     const cryptoAddress = byId("destination");
 
-    if (bankSelect) {
-      bankSelect.required = isUSD;
-    }
+    if (bankSelect) bankSelect.required = false;
+    if (cryptoAddress) cryptoAddress.required = false;
 
-    if (cryptoAddress) {
-      cryptoAddress.required = !isUSD;
-    }
+    const accountNumber = byId("liveAccountNumber");
+    const routingNumber = byId("liveRoutingNumber");
+
+    if (accountNumber) accountNumber.required = false;
+    if (routingNumber) routingNumber.required = false;
 
     updateEstimatedValue();
   }
@@ -785,6 +781,120 @@ document.addEventListener("DOMContentLoaded", () => {
     "input",
     updateEstimatedValue
   );
+
+  
+    // ========================================
+  // NEXORA — DEMO WITHDRAWAL SUBMISSION
+  // ========================================
+
+  const withdrawForm = byId("withdrawForm");
+
+  withdrawForm?.addEventListener("submit", async event => {
+    event.preventDefault();
+
+    if (withdrawalSubmitting) return;
+
+    hideNotice();
+
+    const asset = byId("withdrawAsset")?.value;
+    const amount = Number(byId("withdrawAmount")?.value);
+
+    const selectedBalance = getAsset(asset)?.balance;
+
+    if (!["BTC", "ETH", "USDT", "USD"].includes(asset)) {
+      showNotice("Select a supported asset.", "error");
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showNotice("Enter a valid withdrawal amount.", "error");
+      return;
+    }
+
+    if (
+      !Number.isFinite(selectedBalance) ||
+      amount > selectedBalance
+    ) {
+      showNotice("Insufficient live balance.", "error");
+      return;
+    }
+
+    const submitButton =
+      withdrawForm.querySelector('[type="submit"]');
+
+    withdrawalSubmitting = true;
+
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Submitting...";
+    }
+
+    try {
+      const result = await api.requestWithdrawal({
+        asset,
+        amount,
+        destination: "DEMO-WITHDRAWAL-REQUEST"
+      });
+
+      console.log("NEXORA live withdrawal saved:", result);
+
+      const refreshed = await refreshAccount();
+
+      if (!refreshed) {
+        showNotice(
+          "The liv withdrawal was submitted, Check transaction history before submitting again.",
+          "error"
+        );
+        return;
+      }
+
+      const withdrawalId =
+        typeof result === "string"
+          ? result
+          : result?.id ||
+            result?.withdrawal_id ||
+            result?.reference;
+
+      const savedTransaction = withdrawalId
+        ? transactions.find(item => item.id === withdrawalId)
+        : null;
+
+      if (withdrawalId && !savedTransaction) {
+        showNotice(
+          "The request was submitted, but its transaction record could not be confirmed in the refreshed history. Do not submit it again yet.",
+          "error"
+        );
+        return;
+      }
+
+      withdrawForm.reset();
+
+      updateWithdrawAsset();
+      updateEstimatedValue();
+
+      showNotice(
+        "Live withdrawal request submitted successfully. Status: Pending.",
+        "success"
+      );
+
+    } catch (error) {
+      console.error("NEXORA withdrawal error:", error);
+
+      showNotice(
+        error.message || "Withdrawal submission failed.",
+        "error"
+      );
+
+    } finally {
+      withdrawalSubmitting = false;
+
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = "Submit withdrawal →";
+      }
+    }
+  });
+
 
   // ========================================
 // DEPOSIT ADDRESSES — SUPABASE
@@ -1020,161 +1130,178 @@ byId("copySelectedDepositAddress")?.addEventListener(
   }
 );
 
-// ========================================
-// NAVIGATION
-// ========================================
 
-const pageIds = {
-  Dashboard: "dashboardPage",
-  Deposit: "depositPage",
-  Withdraw: "withdrawPage",
-  Exchange: "exchangePage",
-  Transactions: "transactionsPage",
-  Profile: "profilePage"
-};
+  
+
+  // ========================================
+  // NAVIGATION
+  // ========================================
+
+  const pageIds = {
+    Dashboard: "dashboardPage",
+    Deposit: "depositPage",
+    Withdraw: "withdrawPage",
+    Exchange: "exchangePage",
+    Transactions: "transactionsPage",
+    Profile: "profilePage"
+  };
 
 async function navigateTo(page) {
-  if (!pageIds[page]) return;
+    if (!pageIds[page]) return;
 
-  document.querySelectorAll(".page").forEach(section => {
-    section.classList.add("hidden");
-  });
+    document.querySelectorAll(".page").forEach(section => {
+      section.classList.add("hidden");
+    });
 
-  byId(pageIds[page])?.classList.remove("hidden");
+    byId(pageIds[page])?.classList.remove("hidden");
 
-  if (byId("pageTitle")) {
-    byId("pageTitle").textContent = page;
+    if (byId("pageTitle")) {
+      byId("pageTitle").textContent = page;
+    }
+
+    document.querySelectorAll("[data-page]").forEach(button => {
+      button.classList.toggle(
+        "active",
+        button.dataset.page === page
+      );
+    });
+
+    byId("sidebar")?.classList.remove("open");
+
+    hideNotice();
+
+    if (page === "Withdraw") {
+      updateWithdrawAsset();
+    }
+
+    if (page === "Deposit") {
+      showDepositAssetList();
+      await loadDepositAddresses();
+    }
+
+    if (page === "Transactions") {
+      renderTransactions("allTransactions", transactions);
+    }
   }
 
   document.querySelectorAll("[data-page]").forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.page === page
-    );
+    button.addEventListener("click", event => {
+      event.preventDefault();
+
+      const page = button.dataset.page;
+
+      navigateTo(page);
+
+      if (page === "Exchange") {
+        showNotice("Exchange is disabled in this version.", "info");
+      }
+
+      if (page === "Profile") {
+        showNotice(
+          "Profile management is not enabled yet.",
+          "info"
+        );
+      }
+    });
   });
 
-  byId("sidebar")?.classList.remove("open");
-
-  hideNotice();
-
-  if (page === "Withdraw") {
-    updateWithdrawAsset();
-  }
-
-  if (page === "Deposit") {
-    showDepositAssetList();
-    await loadDepositAddresses();
-  }
-
-  if (page === "Transactions") {
-    renderTransactions("allTransactions", transactions);
-  }
-}
-
-document.querySelectorAll("[data-page]").forEach(button => {
-  button.addEventListener("click", event => {
-    event.preventDefault();
-
-    const page = button.dataset.page;
-
-    navigateTo(page);
-
-    if (page === "Exchange") {
-      showNotice("Exchange is disabled in this version.", "info");
-    }
-
-    if (page === "Profile") {
-      showNotice(
-        "Profile management is not enabled yet.",
-        "info"
-      );
-    }
+  byId("menuButton")?.addEventListener("click", () => {
+    byId("sidebar")?.classList.toggle("open");
   });
-});
 
-byId("menuButton")?.addEventListener("click", () => {
-  byId("sidebar")?.classList.toggle("open");
-});
+  // ========================================
+  // STARTUP / SESSION RESTORE
+  // ========================================
 
-// ========================================
-// STARTUP / SESSION RESTORE
-// ========================================
+  async function startDashboard(user) {
+    showDashboard(user);
+    drawPortfolioChart();
 
-async function startDashboard(user) {
-  showDashboard(user);
-  drawPortfolioChart();
+    await navigateTo("Dashboard");
+    await refreshAccount();
+  }
 
-  await navigateTo("Dashboard");
-  await refreshAccount();
-}
+  async function restoreSession() {
+    try {
+      const { data, error } =
+        await api.client.auth.getSession();
 
-async function restoreSession() {
-  try {
-    const { data, error } =
-      await api.client.auth.getSession();
+      if (error) throw error;
 
-    if (error) throw error;
+      const user = data.session?.user;
 
-    const user = data.session?.user;
+      if (user && !user.is_anonymous) {
+        await startDashboard(user);
 
-    if (user && !user.is_anonymous) {
-      await startDashboard(user);
+      } else {
+        appShell?.classList.add("hidden");
+        mobileNav?.classList.add("hidden");
+        authScreen?.classList.remove("hidden");
 
-    } else {
+        showSignup();
+      }
+
+    } catch (error) {
+      console.error("NEXORA session restore error:", error);
+
       appShell?.classList.add("hidden");
       mobileNav?.classList.add("hidden");
       authScreen?.classList.remove("hidden");
 
       showSignup();
+
+      showNotice(
+        error.message || "Could not restore session.",
+        "error"
+      );
+    }
+  }
+
+  restoreSession();
+
+  // ========================================
+  // TRANSACTION RECEIPT
+  // ========================================
+
+  function showReceipt({
+    reference,
+    type,
+    asset,
+    amount,
+    date,
+    status = "pending"
+  }) {
+    const referenceElement = byId("receiptReference");
+    const typeElement = byId("receiptType");
+    const assetElement = byId("receiptAsset");
+    const amountElement = byId("receiptAmount");
+    const dateElement = byId("receiptDate");
+    const statusElement = byId("receiptStatus");
+    const receiptSection = byId("receiptSection");
+
+    if (!receiptSection) return;
+
+    if (referenceElement) referenceElement.textContent = reference;
+    if (typeElement) typeElement.textContent = type;
+    if (assetElement) assetElement.textContent = asset;
+
+    if (amountElement) {
+      amountElement.textContent = `${amount} ${asset}`;
     }
 
-  } catch (error) {
-    console.error("NEXORA session restore error:", error);
+    if (dateElement) {
+      dateElement.textContent = new Date(date).toLocaleString();
+    }
 
-    appShell?.classList.add("hidden");
-    mobileNav?.classList.add("hidden");
-    authScreen?.classList.remove("hidden");
+    if (statusElement) {
+      statusElement.textContent = status.toUpperCase();
+    }
 
-    showSignup();
-
-    showNotice(
-      error.message || "Could not restore session.",
-      "error"
-    );
+    receiptSection.hidden = false;
   }
-}
 
-restoreSession();
-
-// ========================================
-// TRANSACTION RECEIPT
-// ========================================
-
-function showReceipt({
-  reference,
-  type,
-  asset,
-  amount,
-  date,
-  status = "pending"
-}) {
-  byId("receiptReference").textContent = reference;
-  byId("receiptType").textContent = type;
-  byId("receiptAsset").textContent = asset;
-  byId("receiptAmount").textContent = `${amount} ${asset}`;
-
-  byId("receiptDate").textContent =
-    new Date(date).toLocaleString();
-
-  const statusElement = byId("receiptStatus");
-
-  statusElement.textContent = status.toUpperCase();
-
-  byId("receiptSection").hidden = false;
-}
-
-byId("closeReceipt")?.addEventListener("click", () => {
-  byId("receiptSection").hidden = true;
-});
+  byId("closeReceipt")?.addEventListener("click", () => {
+    byId("receiptSection").hidden = true;
+  });
 
 });

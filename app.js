@@ -571,6 +571,8 @@ document.addEventListener("DOMContentLoaded", () => {
       item.funding_method === "bank_deposit_demo"
         ? "Direct Bank Deposit"
         : "Account Funded"
+    )
+  : " Withdrawal Request";
 
       const sign = isFunding ? "+" : "−";
       const amountClass = isFunding ? "positive" : "negative";

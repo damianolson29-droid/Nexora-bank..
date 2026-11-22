@@ -651,6 +651,23 @@ function updateWithdrawAsset() {
 
   updateEstimatedValue();
 }
+
+// ========================================
+// UPDATE ESTIMATED WITHDRAWAL VALUE
+// ========================================
+
+function updateEstimatedValue() {
+  const amount = Number(byId("withdrawAmount")?.value);
+
+  const value =
+    Number.isFinite(amount) && amount > 0 ? amount : 0;
+
+  if (byId("estimatedValue")) {
+    byId("estimatedValue").textContent =
+      formatMoney(value * PRICES[selectedAsset]);
+  }
+}
+
 // ========================================
 // DEPOSIT ADDRESSES — SUPABASE
 // ========================================

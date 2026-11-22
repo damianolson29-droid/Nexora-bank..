@@ -673,49 +673,31 @@
           <option>First Citizens Bank</option>
         </select>
 
-        <label for="liveAccountNumber">
-          bank account number
-        </label>
+       <label for="liveAccountNumber">
+  Live bank account reference
+</label>
 
-        <input
-          type="text"
-          id="liveAccountNumber"
-          value="Enter your bank account number"
-          readonly
-        >
+<input
+  type="text"
+  id="liveAccountNumber"
+  placeholder="e.g. Live-ACCOUNT-1234"
+  pattern="Live-[A-Za-z0-9-]+"
+  
+>
 
-        <label for="liveRoutingNumber">
-          live bank routing number
-        </label>
+<label for="liveRoutingNumber">
+  routing reference
+</label>
 
-        <input
-          type="text"
-          id="liveRoutingNumber"
-          value="Enter your Routing number"
-          readonly
-        >
+<input
+  type="text"
+  id="liveRoutingNumber"
+  placeholder="e.g. Live-ROUTING-5678"
+  pattern="LIVE-[A-Za-z0-9-]+"
+  
+>
 
-        <p class="bank-LIVE-note">
-          banking details only. 
-        </p>
 
-      </div>
-
-      <!-- CRYPTO ADDRESS FIELD -->
-      <div id="cryptoDestinationField">
-
-        <label for="destination">
-          Crypto withdrawal address
-        </label>
-
-        <input
-          id="destination"
-          type="text"
-          placeholder="Enter your live address"
-          minlength="6"
-        >
-
-      </div>
 
       <div class="withdraw-summary">
         <span>Estimated value</span>
